@@ -12,6 +12,7 @@ import ctypes
 from numpy import nan
 
 
+
 myappid = u'migrant+'  # arbitrary string
 ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 
@@ -80,12 +81,13 @@ class TableModel(QtCore.QAbstractTableModel):
         self._data = data
 
         for column in self._data.columns:
-            if column in ['Патент план', 'Дата выдачи', 'Оплачен до']:
+            if column in ['Патент план', 'Дата выдачи', 'Оплачен до','План регистрация','Регистрация']:
                 self._data[column] = pd.to_datetime(self._data[column]).dt.date
 
-        print(self._data.info())
+
         self._data['Патент план'] = self._data["Оплачен до"] + pd.Timedelta(days=20)
         self._data['Чек план'] = self._data["Оплачен до"] + pd.Timedelta(days=10)
+        self._data['План регистрация']= self._data['Регистрация'] - pd.Timedelta(days=10)
 
         print(self._data.info())
         self.checks = {}
@@ -99,12 +101,13 @@ class TableModel(QtCore.QAbstractTableModel):
             return Qt.Unchecked
 
     def setData(self, index, value, role):
-
         # self.beginResetModel()
         if role == Qt.CheckStateRole:
             self.checks[QtCore.QPersistentModelIndex(index)] = value
             self.inp_.check_state.emit(value, index)
             return True
+        if self.headerData(index.column(),Qt.Horizontal,Qt.DisplayRole)=='Регистрация':
+            self._data.loc[index.row(),'План регистрация']=(pd.to_datetime(value)-pd.Timedelta(days=10)).date()
         self._data.iloc[index.row(), index.column()] = value
         self.dataChanged.emit(index, index)
         # self.endResetModel()
@@ -114,7 +117,7 @@ class TableModel(QtCore.QAbstractTableModel):
     def flags(self, index):
         if self.headerData(index.column(), Qt.Horizontal, Qt.DisplayRole) == 'Каптча':
             return QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsEditable | QtCore.Qt.ItemIsSelectable | Qt.ItemIsUserCheckable
-        return QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsEditable | QtCore.Qt.ItemIsSelectable
+        return QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsEditable | QtCore.Qt.ItemIsSelectable | Qt.ItemIsDragEnabled |Qt.ItemIsDropEnabled
 
     def data(self, index, role):
 
@@ -122,7 +125,7 @@ class TableModel(QtCore.QAbstractTableModel):
 
         if role == Qt.DisplayRole and self.headerData \
                     (index.column(), Qt.Horizontal, Qt.DisplayRole) != 'Каптча':
-            if value == None:
+            if pd.isna(value):
                 return ' '
             return str(value)
         elif self.headerData \
@@ -136,6 +139,8 @@ class TableModel(QtCore.QAbstractTableModel):
                 return QtGui.QColor('red')
             elif value == 'Патент оплачен!':
                 return QtGui.QColor('green')
+            elif value =='Необходимо оформить новый патент!':
+                return QtGui.QColor('blue')
 
     def rowCount(self, index):
         return self._data.shape[0]
@@ -153,10 +158,14 @@ class TableModel(QtCore.QAbstractTableModel):
 
     def add_empty_row(self):
         self.beginResetModel()
-
-        self._data = self._data.append(
-            pd.DataFrame(columns=self._data.columns, data=([[None] * len(self._data.columns)]),
-                         index=[self._data.index[-1] + 1]))
+        try:
+            self._data = self._data.append(
+                pd.DataFrame(columns=self._data.columns, data=([[None] * len(self._data.columns)]),
+                             index=[self._data.index[-1] + 1]))
+        except IndexError:
+            self._data = self._data.append(
+                pd.DataFrame(columns=self._data.columns, data=([[None] * len(self._data.columns)]),
+                             index=[0]))
         self.layoutChanged.emit()
         self.endResetModel()
         self.inp_.add_delete_row.emit(self.createIndex(self._data.index[-1], 0), 'add_empty_row')
@@ -191,11 +200,8 @@ class TableModel(QtCore.QAbstractTableModel):
 
     def sorting(self, column, ascending=True):
         self.beginResetModel()
-        self._data = self._data.sort_values(by=self._data.columns[column], ascending=ascending)
+        self._data.sort_values(by=self._data.columns[column], ascending=ascending,inplace=True,ignore_index=True)
         self.endResetModel()
-
-
-
 
 
 
@@ -218,6 +224,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.model = TableModel(pd.read_excel('данные.xlsx',dtype=object))
 
         self.table = QtWidgets.QTableView()
+        self.table.setModel(self.model)
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.openMenu)
@@ -229,27 +236,28 @@ class MainWindow(QtWidgets.QMainWindow):
         self.c.send_data.connect(self.checking)
         self.model.inp_.add_delete_row.connect(self.changed)
         self.model.inp_.check_state.connect(self.check_capcha_input)
+        self.table.setSortingEnabled(True)
 
-
-        self.table.setDragEnabled(True)
         self.table.setDropIndicatorShown(True)
-        self.table.setDragDropMode(self.table.DragDrop)
-
-        self.table.viewport().installEventFilter(self)
-        self.setWindowIcon(QtGui.QIcon(os.getcwd() + r'\logo.png'))
+        self.table.setDragDropOverwriteMode(False)
         self.table.installEventFilter(self)
+        self.table.viewport().installEventFilter(self)
+
+        self.setWindowIcon(QtGui.QIcon(os.getcwd() + r'\logo.png'))
+
         self.add_Tool_Menu_bar()
         self.setGeometry(100, 300, 1100, 500)
-        self.table.setModel(self.model)
+
         self.header = self.table.horizontalHeader()
         self.table.resizeColumnsToContents()
         self.header.setSectionsMovable(True)
         self.header.setDragEnabled(True)
         self.header.setDragDropMode(self.table.InternalMove)
-        self.row_header=self.table.verticalHeader()
+        self.row_header = self.table.verticalHeader()
         self.row_header.setSectionsMovable(True)
         self.row_header.setDragEnabled(True)
         self.row_header.setDragDropMode(self.table.InternalMove)
+
         self.delegate = MyDelegate()
         self.table.setItemDelegate(self.delegate)
         self.setCentralWidget(self.table)
@@ -262,6 +270,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
     def eventFilter(self, source, event):
+        if event.type()==QtCore.QEvent.Drop:
+            self.dragdropCells_Off()
+            self.deleteSelection()
+
         if (event.type() == QtCore.QEvent.KeyPress and
                 event.matches(QtGui.QKeySequence.Copy)):
             self.copySelection()
@@ -287,6 +299,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.column_actions[action](self.column_selected + 1)
         elif action == 'Убыванию':
             self.column_actions[action](self.column_selected, ascending=False)
+        elif action in ['целочисленный','дробный','дата','текстовый']:
+
+            self.model._data.iloc[:, self.column_selected]=self.model._data.iloc[:, self.column_selected].fillna(0)
+            self.model._data.iloc[:,self.column_selected]=self.column_actions[action](self.column_selected)
+            print(self.model._data.info())
         else:
             self.column_actions[action](self.column_selected)
 
@@ -295,6 +312,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def column_settings(self):
         self.column_menu = QtWidgets.QMenu()
         sort_column = QtWidgets.QMenu("Cортировать по", self.column_menu)
+        type_column=QtWidgets.QMenu("Установить тип данных", self.column_menu)
         past_left = QtWidgets.QAction("Вставить слева", self)
         past_right = QtWidgets.QAction("Вставить справа", self)
         delete_column = QtWidgets.QAction("Удалить столбец", self)
@@ -303,9 +321,17 @@ class MainWindow(QtWidgets.QMainWindow):
         sort_column_up = QtWidgets.QAction("Возрастанию", self)
         sort_column_down = QtWidgets.QAction("Убыванию", self)
         sort_column.addActions([sort_column_up, sort_column_down])
+
+        column_types=[QtWidgets.QAction(x, self)
+                      for x in ['целочисленный','дробный','текстовый','дата',] ]
+        type_column.addActions(column_types)
+
         self.column_menu.addMenu(sort_column)
+        self.column_menu.addMenu(type_column)
+
         self.column_menu.addActions([past_left, past_right, delete_column, rename_column])
         self.column_menu.triggered[QtWidgets.QAction].connect(self.column_manage)
+
         self.line = QtWidgets.QLineEdit(parent=self.header.viewport())  # Create
         self.line.setAlignment(QtCore.Qt.AlignHCenter)
         self.line.setHidden(False)
@@ -318,6 +344,12 @@ class MainWindow(QtWidgets.QMainWindow):
                                'Возрастанию': self.model.sorting,
                                'Убыванию': self.model.sorting,
                                }
+        self.column_actions.update({k:v for k,v in zip(['целочисленный','дробный','текстовый','дата',],
+                                    [lambda x:self.model._data.iloc[:,x].astype('int32',errors='ignore'),
+                                     lambda x:self.model._data.iloc[:,x].astype('float',errors='ignore'),
+                                     lambda x:self.model._data.iloc[:,x].astype('str',errors='ignore'),
+                                     lambda x:pd.to_datetime(self.model._data.iloc[:,x]).dt.date] )})
+
 
     def set_line_pos(self, position, hide=True):
         edit_geometry = self.line.geometry()
@@ -344,20 +376,31 @@ class MainWindow(QtWidgets.QMainWindow):
         self.column_selected = self.header.logicalIndexAt(position)
         self.column_menu.exec_(self.table.viewport().mapToGlobal(position))
 
+    def dragdropCells_On(self):
+        print('drag')
+        self.table.setDragEnabled(True)
+        self.table.setDragDropMode(self.table.DragDrop)
+
+    def dragdropCells_Off(self):
+        self.table.setDragEnabled(False)
+
     def init_rc_menu(self):
         self.menu = QtWidgets.QMenu()
         copy = QtWidgets.QAction("Копировать", self)
         delete = QtWidgets.QAction("Удалить строку", self)
         check = QtWidgets.QAction("Проверить патент ", self)
         delete_strings = QtWidgets.QAction("Удалить данные", self)
+        move_items = QtWidgets.QAction("Переместить элементы", self)
         self.menu.addAction(copy)
         self.menu.addAction(delete)
         self.menu.addAction(check)
         self.menu.addAction(delete_strings)
+        self.menu.addAction(move_items)
         copy.triggered.connect(self.copySelection)
         delete.triggered.connect(self.delete_row)
         check.triggered.connect(self.get_data_for_request)
         delete_strings.triggered.connect(self.deleteSelection)
+        move_items.triggered.connect(self.dragdropCells_On)
 
     def changed(self, item, row=None):
 
@@ -394,11 +437,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 column = index.column() - columns[0]
                 table[row][column] = index.data()
             stream = io.StringIO()
-            csv.writer(stream, delimiter=' ').writerows(table)
+            buffer = QtWidgets.QApplication.clipboard().text()
+            delimiter = ' ' if buffer.count(' ') > 0 else '\t'
+            csv.writer(stream, delimiter=delimiter).writerows(table)
             QtGui.QGuiApplication.clipboard().setText(stream.getvalue())
 
     def pasteSelection(self):
-        delimiter=None
         selection = self.table.selectedIndexes()
         if selection:
             model = self.model
@@ -474,26 +518,25 @@ class MainWindow(QtWidgets.QMainWindow):
 
             if answer['status'] == 'PATENT_IS_NOT_PAID':
                 self.model.setData(patent_index, 'Патент не оплачен!', Qt.DisplayRole)
-                self.model.setData(date_patent_index,
-                                   pd.to_datetime(answer['statusDetail']['paidTillDate']).date(), Qt.DisplayRole)
-                self.model.setData(date_patent_index_to_pay,
-                                   pd.to_datetime(answer['statusDetail']['paidTillDate']).date()+ pd.Timedelta(days=20), Qt.DisplayRole)
-
-                self.model.setData(date_patent_index_to_pay,
-                                   pd.to_datetime(answer['statusDetail']['paidTillDate']).date() + pd.Timedelta(
-                                       days=20), Qt.DisplayRole)
-
-
-
 
             if answer['status'] == 'PATENT_VALID':
                 self.model.setData(patent_index, 'Патент оплачен!', Qt.DisplayRole)
-                self.model.setData(date_patent_index,
-                                   pd.to_datetime(answer['statusDetail']['paidTillDate']).date(), Qt.DisplayRole)
-                self.model.setData(date_patent_index_to_pay,
-                                   pd.to_datetime(answer['statusDetail']['paidTillDate']).date() + pd.Timedelta(
-                                       days=20), Qt.DisplayRole)
-                self.model.itemData(patent_index)
+
+            if answer['status'] == 'PATENT_EXPIRED':
+                self.model.setData(patent_index, 'Необходимо оформить новый патент!', Qt.DisplayRole)
+
+            self.model.setData(date_patent_index,
+                               pd.to_datetime(answer['statusDetail']['paidTillDate']).date(), Qt.DisplayRole)
+            self.model.setData(date_patent_index_to_pay,
+                               pd.to_datetime(answer['statusDetail']['paidTillDate']).date() + pd.Timedelta(days=20),
+                               Qt.DisplayRole)
+
+            self.model.setData(plan_check_index,
+                               pd.to_datetime(answer['statusDetail']['paidTillDate']).date() + pd.Timedelta(
+                                   days=10), Qt.DisplayRole)
+
+
+                # self.model.itemData(patent_index)
             # self.check_patent.status = False
 
     def openMenu(self, position):
