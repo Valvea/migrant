@@ -82,7 +82,7 @@ class TableModel(QtCore.QAbstractTableModel):
 
         for column in self._data.columns:
             if column in ['Патент план', 'Дата выдачи', 'Оплачен до','План регистрация','Регистрация']:
-                self._data[column] = pd.to_datetime(self._data[column]).dt.date
+                self._data[column] = pd.to_datetime(self._data[column],errors='coerce').dt.date
 
 
         self._data['Патент план'] = self._data["Оплачен до"] + pd.Timedelta(days=20)
