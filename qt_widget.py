@@ -9,9 +9,11 @@ from PySide2 import QtCore, QtGui, QtWidgets
 from PySide2.QtCore import Qt, Signal
 from patent_request import Check_patent
 import ctypes
-
+from threading import current_thread
+from threading import enumerate
 myappid = u'migrant+'  # arbitrary string
 ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+from functools import reduce
 
 
 class CommandEdit(QtWidgets.QUndoCommand):
@@ -259,6 +261,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.header.setContextMenuPolicy(Qt.CustomContextMenu)
         self.header.customContextMenuRequested.connect(self.header_pressed)
         self.createDockWindows()
+        self.lock = Event()
+        self.seach_window=False
 
     def eventFilter(self, source, event):
         if event.type() == QtCore.QEvent.Drop:
@@ -305,24 +309,31 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.searchEdit.editingFinished.connect(self.set_word_to_seach)
         self.button.clicked.connect(self.seach_proceed_)
-        self.docked.visibilityChanged.connect(self.stop_seach)
+        self.docked.visibilityChanged.connect(self.seach_status)
 
     def set_word_to_seach(self):
-        self.lock = Event()
-        self.seach_word = self.sender().text()
         self.new_query = True
+        self.lock.set()
+        self.lock.clear()
+        self.seach_word = self.sender().text()
         self.seach_proceed = False
         self.find_thread = Thread(target=self.__find_item__, daemon=True)
         self.find_thread.start()
 
     def show_seach(self):
         self.docked.show()
-        self.seaching = True
 
+    def seach_status(self,status):
+        print(status)
+        self.seach_window=status
+        if not status:
+            self.lock.set()
+            self.lock.clear()
+            self.find_thread.join()
+            self.remain.setText('Осталось:')
+            self.finds.setText('Найдено:')
+            self.searchEdit.setText('')
 
-    def stop_seach(self):
-        print('closed/open')
-        self.seaching = False
 
     def seach_proceed_(self):
         self.lock.set()
@@ -331,7 +342,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def __find_item__(self):
         self.table.clearSelection()
-        self.seach_proceed = False
         columns_count = self.model.columnCount(1)
 
         def get_find_indexes(i):
@@ -341,21 +351,34 @@ class MainWindow(QtWidgets.QMainWindow):
                                     -1,
                                     Qt.MatchContains)
 
-        self.lock.wait()
+        try:
+            self.find_indexs=reduce(lambda x,y:x+y,
+                                    (get_find_indexes(i)
+                                     for i in range(columns_count)
+                                     if get_find_indexes(i)))
+
+            self.lock.wait()
 
 
-        if self.seach_proceed:
-            self.find_indexs = next(get_find_indexes(i) for i in range(columns_count) if get_find_indexes(i))
-            self.finds.setText(f'Найдено:{len(self.find_indexs)}')
-            self.remain.setText(f'Осталось:{len(self.find_indexs)}')
-            self.new_query = False
-            for item in self.find_indexs:
-                self.lock.wait()
-                if not self.seaching:
-                    break
-                self.table.selectRow(item.row())
-                self.remain.setText(f'Осталось:{int(self.remain.text().strip("Осталось:")) - 1}')
-                self.seach_proceed = False
+            if self.seach_proceed:
+                self.new_query=False
+                self.finds.setText(f'Найдено:{len(self.find_indexs)}')
+                self.remain.setText(f'Осталось:{len(self.find_indexs)}')
+                for item in self.find_indexs:
+                    if self.new_query or not self.seach_window:
+                        print('br')
+                        break
+                    self.lock.wait()
+                    self.table.selectRow(item.row())
+                    self.remain.setText(f'Осталось:{int(self.remain.text().strip("Осталось:")) - 1}')
+                    print(enumerate())
+
+        except Exception as e:
+            print(e)
+            self.finds.setText(f'Ничего не найдено.')
+            self.remain.setText('')
+
+
 
     def column_manage(self, action):
         action = action.text()
