@@ -9,8 +9,8 @@ from PySide2 import QtCore, QtGui, QtWidgets
 from PySide2.QtCore import Qt, Signal
 from patent_request import Check_patent
 import ctypes
-from threading import current_thread
-from threading import enumerate
+
+
 myappid = u'migrant+'  # arbitrary string
 ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 from functools import reduce
@@ -371,7 +371,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.lock.wait()
                     self.table.selectRow(item.row())
                     self.remain.setText(f'Осталось:{int(self.remain.text().strip("Осталось:")) - 1}')
-                    print(enumerate())
+
 
         except Exception as e:
             print(e)
