@@ -3,20 +3,15 @@ import io
 import time
 import os
 import sys
-from threading import Thread
+from threading import Thread,Event
 import pandas as pd
 from PySide2 import QtCore, QtGui, QtWidgets
 from PySide2.QtCore import Qt, Signal
 from patent_request import Check_patent
 import ctypes
-from  threading import current_thread
-
-
-
 
 myappid = u'migrant+'  # arbitrary string
 ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-
 
 
 class CommandEdit(QtWidgets.QUndoCommand):
@@ -82,13 +77,12 @@ class TableModel(QtCore.QAbstractTableModel):
         self._data = data
 
         for column in self._data.columns:
-            if column in ['Патент план', 'Дата выдачи', 'Оплачен до','План регистрация','Регистрация']:
-                self._data[column] = pd.to_datetime(self._data[column],errors='coerce').dt.date
-
+            if column in ['Патент план', 'Дата выдачи', 'Оплачен до', 'План регистрация', 'Регистрация']:
+                self._data[column] = pd.to_datetime(self._data[column], errors='coerce').dt.date
 
         self._data['Патент план'] = self._data["Оплачен до"] + pd.Timedelta(days=20)
         self._data['Чек план'] = self._data["Оплачен до"] + pd.Timedelta(days=10)
-        self._data['План регистрация']= self._data['Регистрация'] - pd.Timedelta(days=10)
+        self._data['План регистрация'] = self._data['Регистрация'] - pd.Timedelta(days=10)
 
         print(self._data.info())
         self.checks = {}
@@ -107,8 +101,8 @@ class TableModel(QtCore.QAbstractTableModel):
             self.checks[QtCore.QPersistentModelIndex(index)] = value
             self.inp_.check_state.emit(value, index)
             return True
-        if self.headerData(index.column(),Qt.Horizontal,Qt.DisplayRole)=='Регистрация':
-            self._data.loc[index.row(),'План регистрация']=(pd.to_datetime(value)-pd.Timedelta(days=10)).date()
+        if self.headerData(index.column(), Qt.Horizontal, Qt.DisplayRole) == 'Регистрация':
+            self._data.loc[index.row(), 'План регистрация'] = (pd.to_datetime(value) - pd.Timedelta(days=10)).date()
         self._data.iloc[index.row(), index.column()] = value
         self.dataChanged.emit(index, index)
         # self.endResetModel()
@@ -118,7 +112,7 @@ class TableModel(QtCore.QAbstractTableModel):
     def flags(self, index):
         if self.headerData(index.column(), Qt.Horizontal, Qt.DisplayRole) == 'Каптча':
             return QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsEditable | QtCore.Qt.ItemIsSelectable | Qt.ItemIsUserCheckable
-        return QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsEditable | QtCore.Qt.ItemIsSelectable | Qt.ItemIsDragEnabled |Qt.ItemIsDropEnabled
+        return QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsEditable | QtCore.Qt.ItemIsSelectable | Qt.ItemIsDragEnabled | Qt.ItemIsDropEnabled
 
     def data(self, index, role):
 
@@ -136,11 +130,11 @@ class TableModel(QtCore.QAbstractTableModel):
             else:
                 return value
         elif role == Qt.ForegroundRole:
-            if value == "Патент не оплачен!" or value== 'Не верно введена каптча':
+            if value == "Патент не оплачен!" or value == 'Не верно введена каптча':
                 return QtGui.QColor('red')
             elif value == 'Патент оплачен!':
                 return QtGui.QColor('green')
-            elif value =='Необходимо оформить новый патент!':
+            elif value == 'Необходимо оформить новый патент!':
                 return QtGui.QColor('blue')
 
     def rowCount(self, index):
@@ -176,7 +170,7 @@ class TableModel(QtCore.QAbstractTableModel):
 
     def delete_row(self, indexs):
         self.inp_.add_delete_row.emit(indexs[0].row(), 'delete row')
-        self._data.drop([index.row() for index in indexs ], inplace=True)
+        self._data.drop([index.row() for index in indexs], inplace=True)
         self._data.reset_index(inplace=True, drop=True)
         self.layoutChanged.emit()
 
@@ -199,12 +193,10 @@ class TableModel(QtCore.QAbstractTableModel):
         self._data.drop(self._data.columns[index], axis=1, inplace=True)
         self.endResetModel()
 
-    # def sorting(self, column, ascending=True):
-    #     self.beginResetModel()
-    #     self._data.sort_values(by=self._data.columns[column], ascending=ascending,inplace=True,ignore_index=True)
-    #     self.endResetModel()
-
-
+    def sorting(self, column, ascending=True):
+        self.beginResetModel()
+        self._data.sort_values(by=self._data.columns[column], ascending=ascending, inplace=True, ignore_index=True)
+        self.endResetModel()
 
 
 class Communicate(QtCore.QObject):
@@ -215,28 +207,6 @@ class Communicate(QtCore.QObject):
     add_delete_row = Signal(QtCore.QModelIndex, str)
 
 
-# class SearchDialog(QtWidgets.QDialog):
-#
-#     def __init__(self, parent = None):
-#         QtWidgets.QDialog.__init__(self, parent)
-#         self.setWindowTitle('Поиск')
-#         self.searchEdit = QtWidgets.QLineEdit()
-#         self.searchEdit.setFixedHeight(30)
-#         self.button=QtWidgets.QPushButton('Далее')
-#         self.button.setFixedHeight(30)
-#         self.searchEdit.setFont(QtGui.QFont("Arial", 11))
-#         self.button.setAutoDefault(False)
-#         self.layout_H = QtWidgets.QHBoxLayout(self)
-#         self.layout_H.addWidget(self.searchEdit)
-#         self.layout_H.addWidget(self.button)
-#         self.setLayout(self.layout_H)
-#         self.add_info()
-#
-#     def add_info(self):
-#         self.finds = QtWidgets.QLabel('Найдено:')
-#         self.layout_H.addWidget(self.finds)
-
-
 class MainWindow(QtWidgets.QMainWindow):
 
     def __init__(self):
@@ -245,13 +215,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.index = None
         self.undoStack = QtWidgets.QUndoStack(self)
         self.setWindowTitle('Проверка патента на действительность')
-        self.model = TableModel(pd.read_excel('данные.xlsx',dtype=object),)
-        self.proxy_model=QtCore.QSortFilterProxyModel(self)
-        self.proxy_model.setSourceModel(self.model)
-        self.proxy_model.setDynamicSortFilter(False)
+        self.model = TableModel(pd.read_excel('данные.xlsx', dtype=object))
         self.table = QtWidgets.QTableView()
-        self.table.setModel(self.proxy_model)
-        self.table.setSelectionMode(self.table.ExtendedSelection)
+        self.table.setModel(self.model)
+        self.table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.openMenu)
         self.table.setFont(QtGui.QFont("Arial", 11))
@@ -262,14 +229,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.c.send_data.connect(self.checking)
         self.model.inp_.add_delete_row.connect(self.changed)
         self.model.inp_.check_state.connect(self.check_capcha_input)
-        self.table.setSortingEnabled(True)
+
         self.table.setDropIndicatorShown(True)
         self.table.setDragDropOverwriteMode(False)
         self.table.installEventFilter(self)
         self.table.viewport().installEventFilter(self)
+
         self.setWindowIcon(QtGui.QIcon(os.getcwd() + r'\logo.png'))
+
         self.add_Tool_Menu_bar()
         self.setGeometry(100, 300, 1100, 500)
+
         self.header = self.table.horizontalHeader()
         self.table.resizeColumnsToContents()
         self.header.setSectionsMovable(True)
@@ -279,6 +249,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.row_header.setSectionsMovable(True)
         self.row_header.setDragEnabled(True)
         self.row_header.setDragDropMode(self.table.InternalMove)
+
         self.delegate = MyDelegate()
         self.table.setItemDelegate(self.delegate)
         self.setCentralWidget(self.table)
@@ -287,49 +258,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.set_line_pos(0)
         self.header.setContextMenuPolicy(Qt.CustomContextMenu)
         self.header.customContextMenuRequested.connect(self.header_pressed)
-        self.seach_word=''
         self.createDockWindows()
 
-
-    def createDockWindows(self):
-
-        self.docked = QtWidgets.QDockWidget("Поиск", self)
-        self.addDockWidget(Qt.TopDockWidgetArea, self.docked)
-        self.docked.setFeatures(QtWidgets.QDockWidget.DockWidgetClosable)
-        self.dockedWidget = QtWidgets.QWidget(self)
-        self.docked.setWidget(self.dockedWidget)
-        self.dockedWidget.setLayout(QtWidgets.QHBoxLayout())
-        self.searchEdit = QtWidgets.QLineEdit()
-        self.searchEdit.setFixedHeight(25)
-        self.button=QtWidgets.QPushButton('Далее')
-        self.button.setFixedHeight(25)
-        self.searchEdit.setFont(QtGui.QFont("Arial", 11))
-        self.button.setAutoDefault(False)
-        self.finds = QtWidgets.QLabel('Найдено:')
-        self.finds.setFont(QtGui.QFont("Arial",9))
-        self.remain = QtWidgets.QLabel('Осталось:')
-        self.remain.setFont(QtGui.QFont("Arial", 9))
-        widgets=[self.searchEdit,self.button,self.finds,self.remain]
-        for widget in widgets:
-            self.dockedWidget.layout().addWidget(widget)
-        self.docked.hide()
-
-        self.searchEdit.editingFinished.connect(self.set_word_to_seach)
-        self.button.clicked.connect(self.seach_proceed_)
-        self.docked.visibilityChanged.connect(self.stop_seach)
-
-    def set_word_to_seach(self):
-
-        self.seach_word=self.sender().text()
-        self.new_query=True
-        self.seach_proceed = False
-        self.find_thread = Thread(target=self.__find_item__, daemon=True)
-        self.find_thread.start()
-
-
-
     def eventFilter(self, source, event):
-        if event.type()==QtCore.QEvent.Drop:
+        if event.type() == QtCore.QEvent.Drop:
             self.dragdropCells_Off()
             self.deleteSelection()
 
@@ -348,74 +280,94 @@ class MainWindow(QtWidgets.QMainWindow):
 
         return super(QtWidgets.QMainWindow, self).eventFilter(source, event)
 
+    def createDockWindows(self):
 
-    def show_seach_dialog(self):
+        self.docked = QtWidgets.QDockWidget("Поиск", self)
+        self.addDockWidget(Qt.TopDockWidgetArea, self.docked)
+        self.docked.setFeatures(QtWidgets.QDockWidget.DockWidgetClosable)
+        self.dockedWidget = QtWidgets.QWidget(self)
+        self.docked.setWidget(self.dockedWidget)
+        self.dockedWidget.setLayout(QtWidgets.QHBoxLayout())
+        self.searchEdit = QtWidgets.QLineEdit()
+        self.searchEdit.setFixedHeight(30)
+        self.button = QtWidgets.QPushButton('Далее')
+        self.button.setFixedHeight(30)
+        self.searchEdit.setFont(QtGui.QFont("Arial", 11))
+        self.button.setAutoDefault(False)
+        self.finds = QtWidgets.QLabel('Найдено:')
+        self.finds.setFont(QtGui.QFont("Arial", 9))
+        self.remain = QtWidgets.QLabel('Осталось:')
+        self.remain.setFont(QtGui.QFont("Arial", 9))
+        widgets = [self.searchEdit, self.button, self.finds, self.remain]
+        for widget in widgets:
+            self.dockedWidget.layout().addWidget(widget)
+        self.docked.hide()
+
+        self.searchEdit.editingFinished.connect(self.set_word_to_seach)
+        self.button.clicked.connect(self.seach_proceed_)
+        self.docked.visibilityChanged.connect(self.stop_seach)
+
+    def set_word_to_seach(self):
+        self.lock = Event()
+        self.seach_word = self.sender().text()
+        self.new_query = True
+        self.seach_proceed = False
+        self.find_thread = Thread(target=self.__find_item__, daemon=True)
+        self.find_thread.start()
+
+    def show_seach(self):
         self.docked.show()
         self.seaching = True
-        # self.searchDialog = SearchDialog(self)
-        # self.searchDialog.show()
-        # self.searchDialog.searchEdit.editingFinished.connect(self.set_word_to_seach)
-        # self.searchDialog.button.clicked.connect(self.seach_proceed_)
-        # self.searchDialog.finished.connect(self.stop_seach)
-
 
 
     def stop_seach(self):
         print('closed/open')
-        self.seaching=False
+        self.seaching = False
 
     def seach_proceed_(self):
-        print('clicked')
-        self.seach_proceed=True
-
+        self.lock.set()
+        self.lock.clear()
+        self.seach_proceed = True
 
     def __find_item__(self):
         self.table.clearSelection()
-        self.seach_proceed=False
-        columns_count=self.proxy_model.sourceModel().columnCount(1)
+        self.seach_proceed = False
+        columns_count = self.model.columnCount(1)
 
         def get_find_indexes(i):
-            return self.proxy_model.sourceModel().match(self.proxy_model.sourceModel().index(0, i),
-                                                        QtCore.Qt.DisplayRole,
-                                                        self.seach_word,
-                                                        -1,
-                                                        Qt.MatchContains)
+            return self.model.match(self.model.index(0, i),
+                                    QtCore.Qt.DisplayRole,
+                                    self.seach_word,
+                                    -1,
+                                    Qt.MatchContains)
 
+        self.lock.wait()
 
-        while not self.seach_proceed and self.seaching:
-
-            print('wait')
-            print(current_thread())
 
         if self.seach_proceed:
-            self.find_indexs=next(get_find_indexes(i) for i in range(columns_count) if get_find_indexes(i))
+            self.find_indexs = next(get_find_indexes(i) for i in range(columns_count) if get_find_indexes(i))
             self.finds.setText(f'Найдено:{len(self.find_indexs)}')
             self.remain.setText(f'Осталось:{len(self.find_indexs)}')
-            self.new_query=False
+            self.new_query = False
             for item in self.find_indexs:
-                while not self.seach_proceed and self.seaching and not self.new_query:
-                    print('waiting!')
-                    print(current_thread())
-                    time.sleep(0.15)
+                self.lock.wait()
                 if not self.seaching:
                     break
-                self.table.selectRow(self.proxy_model.mapFromSource(item).row())
-                self.remain.setText(f'Осталось:{int(self.remain.text().strip("Осталось:"))-1}')
-                # self.table.selectionModel().select(self.proxy_model.mapFromSource(item),QtCore.QItemSelectionModel.SelectCurrent)
+                self.table.selectRow(item.row())
+                self.remain.setText(f'Осталось:{int(self.remain.text().strip("Осталось:")) - 1}')
                 self.seach_proceed = False
-
 
     def column_manage(self, action):
         action = action.text()
 
         if action == 'Вставить справа':
             self.column_actions[action](self.column_selected + 1)
-        # elif action == 'Убыванию':
-        #     self.column_actions[action](self.column_selected, ascending=False)
-        elif action in ['целочисленный','дробный','дата','текстовый']:
+        elif action == 'Убыванию':
+            self.column_actions[action](self.column_selected, ascending=False)
+        elif action in ['целочисленный', 'дробный', 'дата', 'текстовый']:
 
-            self.model._data.iloc[:, self.column_selected]=self.model._data.iloc[:, self.column_selected].fillna(0)
-            self.model._data.iloc[:,self.column_selected]=self.column_actions[action](self.column_selected)
+            self.model._data.iloc[:, self.column_selected] = self.model._data.iloc[:, self.column_selected].fillna(0)
+            self.model._data.iloc[:, self.column_selected] = self.column_actions[action](self.column_selected)
             print(self.model._data.info())
         else:
             self.column_actions[action](self.column_selected)
@@ -424,8 +376,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def column_settings(self):
         self.column_menu = QtWidgets.QMenu()
-        # sort_column = QtWidgets.QMenu("Cортировать по", self.column_menu)
-        type_column=QtWidgets.QMenu("Установить тип данных", self.column_menu)
+        sort_column = QtWidgets.QMenu("Cортировать по", self.column_menu)
+        type_column = QtWidgets.QMenu("Установить тип данных", self.column_menu)
         past_left = QtWidgets.QAction("Вставить слева", self)
         past_right = QtWidgets.QAction("Вставить справа", self)
         delete_column = QtWidgets.QAction("Удалить столбец", self)
@@ -433,13 +385,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
         sort_column_up = QtWidgets.QAction("Возрастанию", self)
         sort_column_down = QtWidgets.QAction("Убыванию", self)
-        # sort_column.addActions([sort_column_up, sort_column_down])
+        sort_column.addActions([sort_column_up, sort_column_down])
 
-        column_types=[QtWidgets.QAction(x, self)
-                      for x in ['целочисленный','дробный','текстовый','дата',] ]
+        column_types = [QtWidgets.QAction(x, self)
+                        for x in ['целочисленный', 'дробный', 'текстовый', 'дата', ]]
         type_column.addActions(column_types)
 
-        # self.column_menu.addMenu(sort_column)
+        self.column_menu.addMenu(sort_column)
         self.column_menu.addMenu(type_column)
 
         self.column_menu.addActions([past_left, past_right, delete_column, rename_column])
@@ -454,15 +406,18 @@ class MainWindow(QtWidgets.QMainWindow):
                                'Вставить слева': self.model.add_column,
                                'Вставить справа': self.model.add_column,
                                'Удалить столбец': self.model.delete_column,
-                               # 'Возрастанию': self.model.sorting,
-                               # 'Убыванию': self.model.sorting,
+                               'Возрастанию': self.model.sorting,
+                               'Убыванию': self.model.sorting,
                                }
-        self.column_actions.update({k:v for k,v in zip(['целочисленный','дробный','текстовый','дата',],
-                                    [lambda x:self.model._data.iloc[:,x].astype('int32',errors='ignore'),
-                                     lambda x:self.model._data.iloc[:,x].astype('float',errors='ignore'),
-                                     lambda x:self.model._data.iloc[:,x].astype('str',errors='ignore'),
-                                     lambda x:pd.to_datetime(self.model._data.iloc[:,x]).dt.date] )})
-
+        self.column_actions.update({k: v for k, v in zip(['целочисленный', 'дробный', 'текстовый', 'дата', ],
+                                                         [lambda x: self.model._data.iloc[:, x].astype('int32',
+                                                                                                       errors='ignore'),
+                                                          lambda x: self.model._data.iloc[:, x].astype('float',
+                                                                                                       errors='ignore'),
+                                                          lambda x: self.model._data.iloc[:, x].astype('str',
+                                                                                                       errors='ignore'),
+                                                          lambda x: pd.to_datetime(
+                                                              self.model._data.iloc[:, x]).dt.date])})
 
     def set_line_pos(self, position, hide=True):
         edit_geometry = self.line.geometry()
@@ -515,25 +470,20 @@ class MainWindow(QtWidgets.QMainWindow):
         delete_strings.triggered.connect(self.deleteSelection)
         move_items.triggered.connect(self.dragdropCells_On)
 
-
-
     def changed(self, item, row=None):
 
         command = CommandEdit(self.model, item, self.textBeforeEdit, row)
         self.undoStack.push(command)
-        self.table.selectRow(self.proxy_model.mapFromSource(item).row())
 
     def delete_row(self):
         self.model.beginResetModel()
         self.model.delete_row(self.table.selectedIndexes())
         self.model.endResetModel()
 
-
-
     def deleteSelection(self):
-        selection = list(map(self.proxy_model.mapToSource,self.table.selectedIndexes()))
+        selection = self.table.selectedIndexes()
         if selection:
-            # selection = self.table.selectedIndexes()
+            selection = self.table.selectedIndexes()
             rows = sorted(set(index.row() for index in selection))
             columns = sorted(set(index.column() for index in selection))
             self.model.beginResetModel()
@@ -541,7 +491,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.model.endResetModel()
 
     def copySelection(self):
-        selection = list(map(self.proxy_model.mapToSource,self.table.selectedIndexes()))
+        selection = self.table.selectedIndexes()
         if selection:
             rows = sorted(index.row() for index in selection)
             columns = sorted(index.column() for index in selection)
@@ -559,13 +509,13 @@ class MainWindow(QtWidgets.QMainWindow):
             QtGui.QGuiApplication.clipboard().setText(stream.getvalue())
 
     def pasteSelection(self):
-        selection = list(map(self.proxy_model.mapToSource,self.table.selectedIndexes()))
+        selection = self.table.selectedIndexes()
         if selection:
             model = self.model
             buffer = QtWidgets.QApplication.clipboard().text()
             rows = sorted(index.row() for index in selection)
             columns = sorted(index.column() for index in selection)
-            delimiter=' ' if buffer.count(' ')> 0 else '\t'
+            delimiter = ' ' if buffer.count(' ') > 0 else '\t'
             reader = csv.reader(io.StringIO(buffer), delimiter=delimiter)
             if len(rows) == 1 and len(columns) == 1:
                 for i, line in enumerate(reader):
@@ -579,13 +529,10 @@ class MainWindow(QtWidgets.QMainWindow):
                     model.setData(model.index(index.row(), index.column()), arr[row][column], Qt.DisplayRole)
         return
 
-
     def get_data_for_request(self):
 
-        for index in self.table.selectedIndexes():
-            captcha_row = self.proxy_model.mapToSource(index).row()
-            print('captcha_row',captcha_row)
-            print('proxy_model.mapToSource',self.proxy_model.mapToSource(index).row())
+        for row in set(map(lambda x: x.row(), self.table.selectedIndexes())):
+            captcha_row = row
             data = self.model.get_data().iloc[captcha_row,
                                               [index for index, cols in enumerate(self.model._data.columns)
                                                if cols in ['Номер патента', 'Серия патента', 'Дата выдачи']]]
@@ -624,9 +571,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                    'resultCode'] == 'EMPTY_CAPTCHA_ERROR'
                                else "Патент не найден!", Qt.DisplayRole)
 
-
             # self.check_patent.status = False
-
 
         if answer['resultCode'] == 'SUCCESS':
             patent_index = self.model.createIndex(answer['captcha_row'], self.columns_index['Статус патента'])
@@ -653,8 +598,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                pd.to_datetime(answer['statusDetail']['paidTillDate']).date() + pd.Timedelta(
                                    days=10), Qt.DisplayRole)
 
-
-                # self.model.itemData(patent_index)
+            # self.model.itemData(patent_index)
             # self.check_patent.status = False
 
     def openMenu(self, position):
@@ -714,8 +658,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.empty_string.triggered.connect(self.add_empty_row)
         self.cancel.triggered.connect(self.undoStack.undo)
         self.redo.triggered.connect(self.undoStack.redo)
-        # self.find.triggered.connect(self.find_item)
-        self.find.triggered.connect(self.show_seach_dialog)
+        self.find.triggered.connect(self.show_seach)
         tool.addAction(self.empty_string)
         tool.addAction(self.cancel)
         tool.addAction(self.redo)
@@ -733,7 +676,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.check_patent.signal.captcha.connect(self.display_captcha)
         self.check_patent.signal.response.connect(self.response)
         self.c.redy_to_send.connect(self.check_patent.unlock)
-        self.request_thread = Thread(target=self.check_patent.get_patent_status, daemon=True, args=(data,))
+        self.request_thread = Thread(target=self.check_patent.get_patent_status, daemon=True, args=(data, Event()))
         self.request_thread.start()
 
     def processtrigger(self, q):
