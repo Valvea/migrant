@@ -30,20 +30,23 @@ class Check_patent:
         self.row=None
 
 
+
     def lock(self):
         while not self.status:
             time.sleep(1.5)
             print('waiting string','rows:',self.row,'current_thread',current_thread(),'obj',self)
 
     def unlock(self, captcha_string,row):
-        print(captcha_string,row)
         if  row == self.row:
             self.captcha = captcha_string
             self.status = True
+            self.lock.set()
+            self.lock.clear()
 
 
-    def get_patent_status(self, data):
 
+    def get_patent_status(self, data,lock_event):
+        self.lock=lock_event
         self.row=data.name
         with req.Session() as session:
 
@@ -62,7 +65,11 @@ class Check_patent:
             except Exception as e:
                 print("Не удалось прочитать каптчу")
 
-            self.lock()
+
+            # self.lock()
+
+            self.lock.wait()
+
 
             load = {'findByPassport': False,
                     'captcha': self.captcha,
